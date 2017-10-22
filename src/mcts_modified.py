@@ -2,9 +2,19 @@
 from mcts_node import MCTSNode
 from random import choice
 from math import sqrt, log
+import sys
+from p3_t3 import Board
 
 num_nodes = 1000
 explore_faction = 2.
+root_node = MCTSNode(parent=None, parent_action=None)
+fun_board = Board()
+root_node.untried_actions = fun_board.legal_actions(fun_board.starting_state())
+started = False
+identity_of_bot = None
+visited_boxes = set()
+
+
 
 def traverse_nodes(node, state, identity):
     """ Traverses the tree until the end criterion are met.
@@ -12,13 +22,57 @@ def traverse_nodes(node, state, identity):
     Args:
         node:       A tree node from which the search is traversing.
         state:      The state of the game.
-        identity:   The bot's identity, either 'red' or 'blue'.
+        identity:   The bot'as identity, either '1' or '2'.
 
     Returns:        A node from which the next stage of the search can proceed.
 
     """
-    pass
-    # Hint: return leaf_node
+    # dictionaries evaluates to False if empty
+    while node.child_nodes:
+        selection_dict = {}
+        child_actions = node.child_nodes.keys()
+        available_actions = fun_board.legal_actions(state)
+        box_x = available_actions[0][1]
+        box_y = available_actions[0][0]
+
+        # take care of visited boards
+        if fun_board.owned_boxes(state)[(box_y, box_x)] != 0:
+            global visited_boxes
+            visited_boxes.add((box_y, box_x))
+
+            available_actions = fun_board.legal_actions(fun_board.starting_state())
+
+            for action in available_actions:
+                if (action[1], action[0]) in visited_boxes:
+                    available_actions.remove(action)
+
+
+        for child_action in child_actions:
+            if child_action in available_actions:
+                child_node = node.child_nodes[child_action]
+
+                selection = (child_node.wins / child_node.visits) + \
+                            (explore_faction * sqrt(log(node.visits)/child_node.visits))
+                selection_dict[selection] = (child_node, child_action)
+
+        if len(selection_dict) == 0:
+            break
+
+        if fun_board.current_player(state) == identity:
+            selection_num = max(selection_dict, key=float)
+        else:
+            selection_num = min(selection_dict, key=float)
+
+        try:
+            node.untried_actions.remove(selection_dict[selection_num][1])
+        except ValueError:
+            pass
+
+        node = selection_dict[selection_num][0]
+
+
+    return node
+    # hint: return leaf_node
 
 
 def expand_leaf(node, state):
@@ -31,8 +85,15 @@ def expand_leaf(node, state):
     Returns:    The added child node.
 
     """
-    pass
-    # Hint: return new_node
+    #action = list(set(fun_board.legal_actions(state)) - set(node.untried_actions))
+    action = choice(fun_board.legal_actions(state))
+
+    new_node = MCTSNode(parent=node, parent_action=action, action_list=fun_board.legal_actions(state))
+    node.child_nodes[action] = new_node
+    new_node.untried_actions.remove(action)
+
+
+    return new_node
 
 
 def rollout(state):
@@ -42,10 +103,31 @@ def rollout(state):
         state:  The state of the game.
 
     """
-    pass
+
+    while not fun_board.is_ended(state):
+        available_actions = fun_board.legal_actions(state)
+        box_x = available_actions[0][1]
+        box_y = available_actions[0][0]
+        next_move = choice(available_actions)
+        state = fun_board.next_state(state, next_move)
+
+        for action in available_actions:
+            played_state = fun_board.next_state(state, action)
+            if fun_board.owned_boxes(played_state)[(box_y, box_x)] == 2:
+                if fun_board.current_player(state) == 2:
+                    state = fun_board.next_state(state, action)
+                    break
+            if fun_board.owned_boxes(played_state)[(box_y, box_x)] == 1:
+                if fun_board.current_player(state) == 1:
+                    state = fun_board.next_state(state, action)
+                    break
+
+    return state
 
 
 def backpropagate(node, won):
+    # If winning node, won = True
+    # else won = False
     """ Navigates the tree from a leaf node to the root, updating the win and visit count of each node along the path.
 
     Args:
@@ -53,7 +135,14 @@ def backpropagate(node, won):
         won:    An indicator of whether the bot won or lost the game.
 
     """
+
+    while node is not None:
+        node.visits += 1
+        if won:
+            node.wins += 1
+        node = node.parent
     pass
+
 
 
 def think(board, state):
@@ -66,8 +155,12 @@ def think(board, state):
     Returns:    The action to be taken.
 
     """
-    identity_of_bot = board.current_player(state)
-    root_node = MCTSNode(parent=None, parent_action=None, action_list=board.legal_actions(state))
+    if not started:
+        global started
+        started = True
+        global identity_of_bot
+        identity_of_bot = board.current_player(state)
+
 
     for step in range(num_nodes):
         # Copy the game for sampling a playthrough
@@ -76,8 +169,55 @@ def think(board, state):
         # Start at root
         node = root_node
 
+        try:
+            node = traverse_nodes(node, sampled_game, identity_of_bot)
+        except NameError:
+            print('identity of bot not defined')
+
+        leaf_node = expand_leaf(node, sampled_game)
+        sampled_game = rollout(sampled_game)
+
+
+        won = board.win_values(sampled_game)
+        if won is None:
+            won = False
+        elif won[identity_of_bot] == 1:
+            won = True
+        else:
+            won = False
+        backpropagate(leaf_node, won)
+
+    best_action = None
+    best_ratio = 0
+    for action in root_node.child_nodes.keys():
+        child_node = root_node.child_nodes[action]
+        ratio = child_node.wins / child_node.visits
+        if ratio >= best_ratio:
+            best_ratio = ratio
+            best_action = action
+
+    global root_node
+    root_node = node
+
+    if best_action is None:
+        print
+
+    unpacked = board.unpack_state(state)
+
+    pieces = unpacked['pieces']
+    for piece in pieces:
+        if piece['outer-row'] == best_action[0]:
+            if piece['outer-column'] == best_action[1]:
+                if piece['inner-row'] == best_action[2]:
+                    if piece['inner-column'] == best_action[3]:
+                        print
+
+
+
+    return best_action
+
         # Do MCTS - This is all you!
 
     # Return an action, typically the most frequently used action (from the root) or the action with the best
     # estimated win rate.
-    return None
+    #return None
