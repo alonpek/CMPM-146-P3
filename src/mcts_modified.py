@@ -1,3 +1,4 @@
+from _pytest.compat import NoneType
 
 from mcts_node import MCTSNode
 from random import choice
@@ -7,13 +8,7 @@ from p3_t3 import Board
 
 num_nodes = 1000
 explore_faction = 2.
-root_node = MCTSNode(parent=None, parent_action=None)
 fun_board = Board()
-root_node.untried_actions = fun_board.legal_actions(fun_board.starting_state())
-started = False
-identity_of_bot = None
-visited_boxes = set()
-
 
 
 def traverse_nodes(node, state, identity):
@@ -29,22 +24,41 @@ def traverse_nodes(node, state, identity):
     """
     # dictionaries evaluates to False if empty
     while node.child_nodes:
+
+        if len(node.untried_actions) != 0:
+            return node
+
         selection_dict = {}
         child_actions = node.child_nodes.keys()
-        available_actions = fun_board.legal_actions(state)
+
+        available_actions = fun_board.legal_actions(node.state)
+        #print(available_actions)
+
         box_x = available_actions[0][1]
         box_y = available_actions[0][0]
 
-        # take care of visited boards
+
         if fun_board.owned_boxes(state)[(box_y, box_x)] != 0:
             global visited_boxes
             visited_boxes.add((box_y, box_x))
+            backup_actions = fun_board.legal_actions(fun_board.starting_state())
 
-            available_actions = fun_board.legal_actions(fun_board.starting_state())
+            for box in visited_boxes:
+                for action in backup_actions:
+                    if action[0] == box[0] and action[1] == box[1]:
+                        backup_actions.remove(action)
+            for action in child_actions:
+                node.child_nodes[action].untried_actions += backup_actions
+            #print(backup_actions)
+            #
+            # if box_y == box[0] and box_x == box[1]:
+            #     for
+            #
+            # for action in available_actions:
+            #     if fun_board.owned_boxes(state)[action[0], action[1]] != 0:
+            #         available_actions.remove(action)
 
-            for action in available_actions:
-                if (action[1], action[0]) in visited_boxes:
-                    available_actions.remove(action)
+        #print(available_actions)
 
 
         for child_action in child_actions:
@@ -55,21 +69,21 @@ def traverse_nodes(node, state, identity):
                             (explore_faction * sqrt(log(node.visits)/child_node.visits))
                 selection_dict[selection] = (child_node, child_action)
 
+
         if len(selection_dict) == 0:
-            break
+            return node
 
         if fun_board.current_player(state) == identity:
             selection_num = max(selection_dict, key=float)
         else:
             selection_num = min(selection_dict, key=float)
 
-        try:
-            node.untried_actions.remove(selection_dict[selection_num][1])
-        except ValueError:
-            pass
+        #try:
+        #    node.untried_actions.remove(selection_dict[selection_num][1])
+        #except ValueError:
+        #    pass
 
         node = selection_dict[selection_num][0]
-
 
     return node
     # hint: return leaf_node
@@ -85,16 +99,52 @@ def expand_leaf(node, state):
     Returns:    The added child node.
 
     """
-    #action = list(set(fun_board.legal_actions(state)) - set(node.untried_actions))
-    action = choice(fun_board.legal_actions(state))
+    try:
+        action = node.untried_actions.pop()
+    except IndexError:
+        return node
 
-    new_node = MCTSNode(parent=node, parent_action=action, action_list=fun_board.legal_actions(state))
+
+
+    new_node = MCTSNode(parent=node, parent_action=action)
+    new_node.state = fun_board.next_state(node.state, action)
+    new_node.untried_actions = fun_board.legal_actions(new_node.state)
+    #new_node.untried_actions = list(set(node.untried_actions + list(node.child_nodes.keys())) - set(list(action)))
     node.child_nodes[action] = new_node
-    new_node.untried_actions.remove(action)
 
+
+    # #action = list(set(fun_board.legal_actions(state)) - set(node.untried_actions))
+    # #action = choice(fun_board.legal_actions(state))
+    # #if len(node.untried_actions) == 0:
+    # #    print
+    #
+    #
+    # # print(fun_board.legal_actions(node.state))
+    # possible_actions = node.untried_actions
+    # # action = choice(fun_board.legal_actions(node.state))
+    #
+    # action = list(set(possible_actions) & set(fun_board.legal_actions(node.state)))
+    # if len(action) == 0:
+    #     return node
+    #
+    # action = choice(action)
+    #
+    # # while action not in possible_actions:
+    # #     action = choice(fun_board.legal_actions(node.state))
+    #
+    # #possible_actions = []
+    # #for action in node.untried_actions:
+    # #    if action in fun_board.legal_actions(state):
+    # #        possible_actions.append(action)
+    #
+    # # possible_actions = node.untried_actions
+    #
+    # #possible_actions = list(set(node.untried_actions) - set(action))
+    # possible_actions.remove(action)
+    #
+    #
 
     return new_node
-
 
 def rollout(state):
     """ Given the state of the game, the rollout plays out the remainder randomly.
@@ -124,7 +174,6 @@ def rollout(state):
 
     return state
 
-
 def backpropagate(node, won):
     # If winning node, won = True
     # else won = False
@@ -135,8 +184,13 @@ def backpropagate(node, won):
         won:    An indicator of whether the bot won or lost the game.
 
     """
+    #ried_action = node.parent_action
+    #node.untried_actions.remove(tried_action)
 
     while node is not None:
+        # if tried_action in node.untried_actions:
+            # if node.parent is not None:
+            #    node.untried_actions.remove(tried_action)
         node.visits += 1
         if won:
             node.wins += 1
@@ -155,28 +209,103 @@ def think(board, state):
     Returns:    The action to be taken.
 
     """
-    if not started:
-        global started
-        started = True
-        global identity_of_bot
-        identity_of_bot = board.current_player(state)
+    # if not started:
+    #     global started
+    #     started = True
+    #     global identity_of_bot
+    #     identity_of_bot = board.current_player(state)
+    #
+    #     global root_node
+    #     root_node.state = state
+    #
+    # activity_list = []
+    # unpacked = board.unpack_state(state)['pieces']
+    # for piece in unpacked:
+    #     activity = (piece['outer-row'],piece['outer-column'],piece['inner-row'],piece['inner-column'])
+    #     activity_list.append(activity)
+    #
+    # if len(done_activities) == 0:
+    #     if len(activity_list) != 0:
+    #         new_activity = activity_list[0]
+    #         global done_activities
+    #         done_activities.append(new_activity)
+    # else:
+    #     # try:
+    #
+    #     new_activity = list(set(activity_list) - set(done_activities))[0]
+    #     global done_activities
+    #     done_activities.append(new_activity)
+    #     next_state = board.next_state(state, new_activity)
+    #     if board.is_ended(next_state):
+    #         global done_activities
+    #         done_activities = []
+    #         global root_node
+    #         root_node = MCTSNode(parent=None, parent_action=None, action_list=board.legal_actions(state))
+    #         new_activity = None
+    #         global root_node
+    #         root_node.state = state
+    #         global visited_boxes
+    #         visited_boxes = set()
+    #         global done_activities
+    #         done_activities = []
+    #         print(board.points_values(state))
+    #
 
+        # except IndexError:
+        #     #reset for next game
+        #     global done_activities
+        #     done_activities = []
+        #     global root_node
+        #     root_node = MCTSNode(parent=None, parent_action=None, action_list=board.legal_actions(state))
+        #     new_activity = None
+        #     global root_node
+        #     root_node.state = state
+        #     global visited_boxes
+        #     visited_boxes = set()
+        #     global done_activities
+        #     done_activities = []
+        #     print(board.points_values(state))
+        #     # global root_node
+        #     # root_node.untried_actions = board.legal_actions(state)
+
+
+    # new_activity = list(set(activity_list) - set(root_node.parent_action))
+    #
+    # if started:
+    #     if new_activity is not None:
+    #         node = root_node
+    #         global root_node
+    #         try:
+    #             root_node = root_node.child_nodes[new_activity]
+    #         except KeyError:
+    #             print
+    #
+    # if not started:
+    #     global started
+    #     started = True
+    #     global identity_of_bot
+    #     identity_of_bot = board.current_player(state)
+    #
+    #     global root_node
+    #     root_node.state = state
+    #     global root_node
+    #     root_node.untried_actions = board.legal_actions(state)
+
+    identity_of_bot = board.current_player(state)
 
     for step in range(num_nodes):
-        # Copy the game for sampling a playthrough
         sampled_game = state
 
         # Start at root
+        root_node = MCTSNode(parent=None, parent_action=None)
         node = root_node
-
-        try:
-            node = traverse_nodes(node, sampled_game, identity_of_bot)
-        except NameError:
-            print('identity of bot not defined')
+        node.untried_actions = fun_board.legal_actions(state)
+        node.state = sampled_game
+        node = traverse_nodes(node, sampled_game, identity_of_bot)
 
         leaf_node = expand_leaf(node, sampled_game)
-        sampled_game = rollout(sampled_game)
-
+        # sampled_game = rollout(sampled_game)
+        sampled_game = rollout(leaf_node.state)
 
         won = board.win_values(sampled_game)
         if won is None:
@@ -196,25 +325,31 @@ def think(board, state):
             best_ratio = ratio
             best_action = action
 
-    global root_node
-    root_node = node
+    # global root_node
+    # root_node = root_node.child_nodes[best_action]
 
     if best_action is None:
-        print
-
-    unpacked = board.unpack_state(state)
-
-    pieces = unpacked['pieces']
-    for piece in pieces:
-        if piece['outer-row'] == best_action[0]:
-            if piece['outer-column'] == best_action[1]:
-                if piece['inner-row'] == best_action[2]:
-                    if piece['inner-column'] == best_action[3]:
-                        print
-
-
-
+        print(node)
+    print(best_action)
     return best_action
+
+    #done_activities.append(best_action)
+    #print(best_action)
+
+    # next_state = board.next_state(state, best_action)
+    # if board.is_ended(next_state):
+    #     global done_activities
+    #     done_activities = []
+    #     global root_node
+    #     root_node = MCTSNode(parent=None, parent_action=None, action_list=board.legal_actions(state))
+    #     new_activity = None
+    #     global root_node
+    #     root_node.state = state
+    #     global visited_boxes
+    #     visited_boxes = set()
+    #     global done_activities
+    #     done_activities = []
+    # return best_action
 
         # Do MCTS - This is all you!
 
